@@ -13,18 +13,8 @@ import torch
 
 from utils import TryExcept, threaded
 
-from shapely.geometry.point import Point
-from shapely import affinity
-
-def create_ellipse(center, lengths, angle=0):
-    """
-    create a shapely ellipse. adapted from
-    https://gis.stackexchange.com/a/243462
-    """
-    circ = Point(center).buffer(1)
-    ell = affinity.scale(circ, int(lengths[0]), int(lengths[1]))
-    ellr = affinity.rotate(ell, angle)
-    return ellr
+from shapely.geometry import box, Point, Polygon
+from shapely.affinity import scale
 
 def fitness(x):
     # Model fitness as a weighted combination of metrics
@@ -249,42 +239,19 @@ def bbox_iou(box1, box2, xywh=True, GIoU=False, DIoU=False, CIoU=False, eps=1e-7
         # get the axes
         b1_halfw, b1_halfh = (b1_x2 - b1_x1) / 2, (b1_y2 - b1_y1) / 2
         b2_halfw, b2_halfh = (b2_x2 - b2_x1) / 2, (b2_y2 - b2_y1) / 2
-        
-    # -- for ellipse IoU loss -- #
-    loss_list = []
-    b1_x_np = b1_x.detach().numpy()
-    b1_y_np = b1_y.detach().numpy()
-    b2_x_np = b2_x.detach().numpy()
-    b2_y_np = b2_y.detach().numpy()
-    b1_halfw_np = b1_halfw.detach().numpy()
-    b1_halfh_np = b1_halfh.detach().numpy()
-    b2_halfw_np = b2_halfw.detach().numpy()
-    b2_halfh_np = b2_halfh.detach().numpy()
-    for i in range(len(b1_x)):
-        e_b1_x = b1_x_np[i][0]
-        e_b1_y = b1_y_np[i][0]
-        e_b2_x = b2_x_np[i][0]
-        e_b2_y = b2_y_np[i][0]
-        e_b1_halfw = b1_halfw_np[i][0]
-        e_b1_halfh = b1_halfh_np[i][0]
-        e_b2_halfw = b2_halfw_np[i][0]
-        e_b2_halfh = b2_halfh_np[i][0]
-        ellipse_test1 = create_ellipse((e_b1_x,e_b1_y),(e_b1_halfw,e_b1_halfh),0)
-        ellipse_test2 = create_ellipse((e_b2_x,e_b2_y),(e_b2_halfw,e_b2_halfh),0)
-        intersect_test = ellipse_test1.intersection(ellipse_test2)
-        if intersect_test.is_empty:
-            loss_list.append([0.0])
-        else:
-            loss_list.append([intersect_test.area])
 
     # Ellipse intersection area
-    inter = torch.tensor(loss_list, requires_grad = True)
+    box1_poly = Polygon(box(b1_x-b1_halfw, b1_y-b1_halfh, b1_x+b1_halfw, b1_y+b1_halfh))
+    box2_poly = Polygon(box(b2_x-b2_halfw, b2_y-b2_halfh, b2_x+b2_halfw, b2_y+b2_halfh))
+    intersect_poly = box1_poly.intersection(box2_poly)
+    inter = intersect_poly.area
 
     # Union Area
-    union = w1 * h1 + w2 * h2 - inter + eps
+    area1 = w1 * h1
+    area2 = w2 * h2
+    union = area1 + area2 - inter + eps
 
     # IoU
-    # -- the IoU value is just intersection over union -- #
     iou = inter / union
 
     return iou  # IoU
