@@ -17,6 +17,7 @@ from shapely.geometry.point import Point
 from shapely import affinity
 
 def bbox_to_ellipse(bbox):
+    print(bbox)
     (x_center, y_center, major_axis, minor_axis) = bbox
     rotation_angle = 0
     if major_axis > minor_axis:
