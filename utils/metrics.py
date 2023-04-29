@@ -17,7 +17,7 @@ from shapely.geometry.point import Point
 from shapely import affinity
 
 def bbox_to_ellipse(bbox):
-    x_center, y_center, major_axis, minor_axis = bbox
+    (x_center, y_center, major_axis, minor_axis) = bbox
     rotation_angle = 0
     if major_axis > minor_axis:
         rotation_angle = math.pi / 2
@@ -233,7 +233,7 @@ def bbox_iou(box1, box2, xywh=True, GIoU=False, DIoU=False, CIoU=False, eps=1e-7
     # where each box is represented as (cx, cy, w, h, theta)
 
     # Get the coordinates of the ellipses
-    (x1, y1, w1, h1, theta1), (x2, y2, w2, h2, theta2) = bbox_to_ellipse(box1), bbox_to_ellipse(box2)
+    (x1, y1, w1, h1, theta1), (x2, y2, w2, h2, theta2) = bbox_to_ellipse(box1.chunk(4, -1)), bbox_to_ellipse(box2.chunk(4, -1))
     cos_t1, sin_t1 = torch.cos(theta1), torch.sin(theta1)
     cos_t2, sin_t2 = torch.cos(theta2), torch.sin(theta2)
 
