@@ -16,12 +16,15 @@ from utils import TryExcept, threaded
 from shapely.geometry.point import Point
 from shapely import affinity
 
-def bbox_to_ellipse(bbox):
-    (x_center, y_center, major_axis, minor_axis) = bbox
-    rotation_angle = 0
-    if major_axis > minor_axis:
-        rotation_angle = math.pi / 2
-    return x_center, y_center, major_axis, minor_axis, rotation_angle
+def create_ellipse(center, lengths, angle=0):
+    """
+    create a shapely ellipse. adapted from
+    https://gis.stackexchange.com/a/243462
+    """
+    circ = Point(center).buffer(1)
+    ell = affinity.scale(circ, int(lengths[0]), int(lengths[1]))
+    ellr = affinity.rotate(ell, angle)
+    return ellr
 
 def fitness(x):
     # Model fitness as a weighted combination of metrics
@@ -233,50 +236,56 @@ def bbox_iou(box1, box2, xywh=True, GIoU=False, DIoU=False, CIoU=False, eps=1e-7
     # where each box is represented as (cx, cy, w, h, theta)
 
     # Get the coordinates of the ellipses
-    (x1, y1, w1, h1, theta1), (x2, y2, w2, h2, theta2) = bbox_to_ellipse(box1.chunk(4, -1)), bbox_to_ellipse(box2.chunk(4, -1))
-    cos_t1, sin_t1 = torch.cos(theta1), torch.sin(theta1)
-    cos_t2, sin_t2 = torch.cos(theta2), torch.sin(theta2)
+    if xywh: # transform xywh to xy w/2 h/2 (half axes)
+        (b1_x, b1_y, w1, h1), (b2_x, b2_y, w2, h2) = box1.chunk(4, 1), box2.chunk(4, 1)
+        # half axes for ellipse
+        b1_halfw, b1_halfh, b2_halfw, b2_halfh = w1 / 2, h1 / 2, w2 / 2, h2 / 2
+        
+    else: # transform top-left and bottom-right coordinates into xy w/2 h/2 (half axes)
+        b1_x1, b1_y1, b1_x2, b1_y2 = box1.chunk(4, 1)
+        b2_x1, b2_y1, b2_x2, b2_y2 = box2.chunk(4, 1)
+        # get the center coordinates
+        b1_x, b1_y = (b1_x1 + b1_x2) / 2, (b1_y1 + b1_y2) / 2
+        b2_x, b2_y = (b2_x1 + b2_x2) / 2, (b2_y1 + b2_y2) / 2
+        # get the axes
+        b1_halfw, b1_halfh = (b1_x2 - b1_x1) / 2, (b1_y2 - b1_y1) / 2
+        b2_halfw, b2_halfh = (b2_x2 - b2_x1) / 2, (b2_y2 - b2_y1) / 2
 
-    # Construct the transformation matrix for each ellipse
-    M1 = torch.tensor([[cos_t1, -sin_t1], [sin_t1, cos_t1]])
-    M2 = torch.tensor([[cos_t2, -sin_t2], [sin_t2, cos_t2]])
+    # -- for ellipse IoU loss -- #
+    loss_list = []
+    b1_x_np = b1_x.cpu().detach().numpy()
+    b1_y_np = b1_y.cpu().detach().numpy()
+    b2_x_np = b2_x.cpu().detach().numpy()
+    b2_y_np = b2_y.cpu().detach().numpy()
+    b1_halfw_np = b1_halfw.cpu().detach().numpy()
+    b1_halfh_np = b1_halfh.cpu().detach().numpy()
+    b2_halfw_np = b2_halfw.cpu().detach().numpy()
+    b2_halfh_np = b2_halfh.cpu().detach().numpy()
+    for i in range(len(b1_x)):
+        e_b1_x = b1_x_np[i]
+        e_b1_y = b1_y_np[i]
+        e_b2_x = b2_x_np[i]
+        e_b2_y = b2_y_np[i]
+        e_b1_halfw = b1_halfw_np[i]
+        e_b1_halfh = b1_halfh_np[i]
+        e_b2_halfw = b2_halfw_np[i]
+        e_b2_halfh = b2_halfh_np[i]
+        ellipse_test1 = create_ellipse((e_b1_x,e_b1_y),(e_b1_halfw,e_b1_halfh),0)
+        ellipse_test2 = create_ellipse((e_b2_x,e_b2_y),(e_b2_halfw,e_b2_halfh),0)
+        intersect_test = ellipse_test1.intersection(ellipse_test2)
+        loss_list.append([intersect_test.area])
 
-    # Get the transformed coordinates of the ellipses
-    xy1 = torch.stack([x1, y1])
-    xy2 = torch.stack([x2, y2])
-    xy1_t = torch.mm(M1, xy1)
-    xy2_t = torch.mm(M2, xy2)
+    # Ellipse intersection area
+    inter = torch.tensor(loss_list, requires_grad=True)
 
-    # Get the rotated widths and heights of the ellipses
-    a1, b1 = w1/2, h1/2
-    a2, b2 = w2/2, h2/2
-    a1_t, b1_t = torch.mm(M1, torch.tensor([[a1], [b1]])).squeeze()
-    a2_t, b2_t = torch.mm(M2, torch.tensor([[a2], [b2]])).squeeze()
-
-    # Compute the distance between the centers of the ellipses
-    d = torch.sqrt(torch.sum((xy1_t - xy2_t)**2))
-    
-    # Compute the intersection area
-    A = math.pi * a1_t * b1_t
-    B = math.pi * a2_t * b2_t
-    if d >= a1_t + a2_t:
-        inter = 0
-    elif d <= torch.abs(a1_t - a2_t) and b1_t <= b2_t:
-        inter = A
-    elif d <= torch.abs(a1_t - a2_t) and b1_t > b2_t:
-        inter = B
-    else:
-        alpha = torch.acos((a1_t**2 + d**2 - a2_t**2) / (2 * a1_t * d + eps))
-        beta = torch.acos((a2_t**2 + d**2 - a1_t**2) / (2 * a2_t * d + eps))
-        inter = a1_t**2 * alpha + a2_t**2 * beta - (a1_t * torch.sin(alpha) + a2_t * torch.sin(beta)) * d
-
-    # Compute the union area
-    union = A + B - inter
+    # Union Area
+    union = w1 * h1 + w2 * h2 - inter + eps
 
     # IoU
-    iou = inter / (union + eps)
+    # -- the IoU value is just intersection over union -- #
+    iou = inter / union
 
-    return iou
+    return iou  # IoU
 
 def box_iou(box1, box2, eps=1e-7):
     # https://github.com/pytorch/vision/blob/master/torchvision/ops/boxes.py
