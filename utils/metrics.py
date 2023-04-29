@@ -228,7 +228,7 @@ class ConfusionMatrix:
             print(' '.join(map(str, self.matrix[i])))
 
 
-def bbox_iou(box1, box2, eps=1e-7):
+def bbox_iou(box1, box2, xywh=True, GIoU=False, DIoU=False, CIoU=False, eps=1e-7):
     # Returns Intersection over Union (IoU) of box1(1,5) to box2(n,5)
     # where each box is represented as (cx, cy, w, h, theta)
 
