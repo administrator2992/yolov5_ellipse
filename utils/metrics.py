@@ -14,6 +14,7 @@ import torch
 from utils import TryExcept, threaded
 
 from shapely.geometry.point import Point
+from matplotlib.patches import Polygon
 from shapely import affinity
 
 def create_ellipse(center, lengths, angle=0):
@@ -24,7 +25,7 @@ def create_ellipse(center, lengths, angle=0):
     circ = Point(center).buffer(1)
     ell = affinity.scale(circ, int(lengths[0]), int(lengths[1]))
     ellr = affinity.rotate(ell, angle)
-    return ellr
+    return Polygon(ellr.exterior.coords)
 
 def fitness(x):
     # Model fitness as a weighted combination of metrics
