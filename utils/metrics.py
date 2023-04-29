@@ -14,7 +14,7 @@ import torch
 from utils import TryExcept, threaded
 
 from shapely.geometry.point import Point
-from matplotlib.patches import Polygon
+from shapely.geometry.polygon import Polygon
 from shapely import affinity
 
 def create_ellipse(center, lengths, angle=0):
