@@ -25,7 +25,7 @@ def create_ellipse(center, lengths, angle=0):
     circ = Point(center).buffer(1)
     ell = affinity.scale(circ, int(lengths[0]), int(lengths[1]))
     ellr = affinity.rotate(ell, angle)
-    return Polygon(ellr.exterior.coords)
+    return ellr
 
 def fitness(x):
     # Model fitness as a weighted combination of metrics
